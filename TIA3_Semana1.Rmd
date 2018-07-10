@@ -1,0 +1,211 @@
+---
+title: "Prueba Piloto de Recolección de Datos"
+author: "Taller de Investigación Aplicada 3 - Semana 1"
+date: " Ariel E. Meilij | 7/5/2018"
+header-includes: \usepackage{fancyhdr} \usepackage{graphicx} \usepackage{eurosym} \usepackage{booktabs,xcolor} \pagestyle{fancy} \fancyhf{} \addtolength{\headheight}{1.0cm} \rhead{Taller de Investigación Aplicada 3} \lhead{\includegraphics[width=6cm]{logoubj.png}} \rfoot{Page \thepage} \fancypagestyle{plain}{\pagestyle{fancy}} 
+output: pdf_document 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introducción
+La siguiente es una prueba piloto de la recolección de datos para la creación de un modelo predictivo de la TRM de Colombia utilizando aprendizaje automatizado. El objetivo de la prueba piloto es evaluar el proceso de creación de la base de datos para la combinación de series de tiempo y regresión multivariable. Inicialmente buscamos cumplir con los requisitos fundamentales del rigor metodológico de investigación:
+
+a) CUALITATIVOS
+  + credibilidad
+  + auditabilidad
+  + aplicabilidad
+
+b) CUANTITATIVOS
+  + validez
+  + objetividad
+  + confiabilidad
+
+## Objetivos de la Prueba Piloto
+Los objetivos especificos de la prueba piloto son:
+
+1. Comprobar la capacidad de accesar las bases de datos financieras de la empresa Quandl a través de la llave API específica asignada al investigador para la recuperación de los puntos de datos necesarios para la conducción de la investigación.
+2. Comprobar la velocidad y factibilidad de recuperar múltiples series de tiempo de forma simultanea con las capacidades del equipo de laboratorio.
+3. Comprobar la factibilidad de confeccionar un arreglo de datos (data frame) combinando variables dependientes (serie de tiempo de los valores de la TRM) y variables independientes (regresores exógenos compuestos por las cotizaciones de los principales rubros de exportación de la economía de Colombia).
+4. Verificar a través del análisis cruzado de variables operativas el potencial de correlaciones entre las mismas antes de proceder el entrenamiento de los diferentes modelos de predicción. Esto no solo aplica a niveles de validez y confiabilidad de los datos, pero también a las capacidades del equipo de laboratorio de poder computar dichas operaciones cruzadas en un tiempo aceptable.
+
+# Trabajo de Laboratorio
+El trabajo de laboratorio se ha dividido en los siguientes subprocesos.
+
+a. Recuperación de Series de Tiempo
+b. Confección de Estructura de Datos
+c. Análisis Cruzado de Correlación
+
+## Recuperación de Series de Tiempo
+Las series de tiempo se acceden de las bases de datos de la empresa _Quandl_ a través de la biblioteca *quandl()* del lenguaje R. El investigador solicitó una llave especial *API* para poder acceder a las fuentes de datos sin problema de limite de uso, la cual fue otorgada por la empresa Quandl como parte de su programa empresarial para atraer académicos, investigadores, y trabajadores profesionales de la información al uso de sus herramientas pagas. Para la prueba piloto se elegieron a criterio del investigador cuatro series de tiempo. La primera es el valor de la TRM para los años 2010 al 2017, ya que es la variable dependiente que deseamos pronosticar con un modelo de aprendizaje automatizado. Las siguientes tres variables independientes son los regresores correspondientes a las cotizaciones del petroleo, café y carbón de los mismos años. Esta tres variables se eligieron por ser valores altamente conocidos, replicables, y que pudieran llegar a estresar el equipo de laboratorio al momento de procesar correlaciones cruzadas. 
+
+Para simplificar la notacion en el código fuente R, las siguientes nomenclaturas se utilizan en las variables de estudio. 
+
+Nomenclatura   |  Variable de Estudio
+---------------|--------------------------------
+trm            | Valor de la TRM utilizando código internacional del peso colombiano
+wti            | Valor de la cotización del barril de petroleo West Texas 
+coffee         | Valor de la cotización del café 
+coal           | Valor de la cotizacion del carbón 
+
+
+El siguiente código R refleja la recuperación de datos.
+
+```{r warning=FALSE, error=FALSE}
+# Carga de librerias necesarias
+library(Quandl)
+library(tseries)
+library(ggplot2)
+library(ggfortify)
+library(Hmisc)
+library(corrplot)
+library(PerformanceAnalytics)
+library(reshape2)
+
+# Llave autorización API
+Quandl.api_key("KzzS8Vfxkw1ZgTWgU4jH")
+
+# lectura de variables trm, coffee, oil, coal
+start_time <- Sys.time()
+trm <- Quandl("CURRFX/USDCOP", collapse = "monthly", type = "ts")
+wti <- Quandl("EIA/PET_RWTC_D", collapse = "monthly", type = "ts")
+coffee <- Quandl("ODA/PCOFFOTM_USD", collapse = "monthly", type = "ts")
+coal <- Quandl("EIA/COAL", collapse = "monthly", type = "ts")
+end_time <- Sys.time()
+end_time - start_time
+
+```
+
+El tiempo de operación de carga de toda la data es aproximadamente de seis a siete segundos, totalmente aceptable para el nivel de equipo y cantidad de datos. 
+
+### Integridad de la serie de datos TRM
+Revisamos la integridad de la serie de tiempo de la TRM efectuando análisis de su estructura, valores estadísticos generales, y gráfica de la misma del año 2010 en adelante.
+
+```{r warning=FALSE, error=FALSE}
+summary(trm)
+autoplot(window(trm, 2010), main = "ANALISIS SERIE DE TIEMPO TRM 2010-2018")
+```
+
+De la información que extraemos de la serie de tiempo, vemos varios factores que pueden complicar los análisis más adelante. 
+
+1. Primeramente, la fuente no devuelve una sola serie de tiempo, sino que devuelve una serie compuesta con los valores alto _(High (est))_, bajo _(Low (est))_ y cierre (Rate). Dado que la empresa Quandl tiene como clientes y usuarios analistas financieros, esto no es para nada inusual. Sin embargo para propósitos de la investigación definiremos solamente el valor de cierre como el de utilidad y desecharemos los demás. 
+
+2. Tanto en el resumen de R como en las gráficas de la serie de tiempo se pueden evidenciar casos de imputación, donde la información es cero. Es imposible que el cierre de la tasa de cambio en un día cualquiera sea cero, pero es factible que errores de sistema o cierres inesperados por fiestas nacionales hayan arrojado como cotización del día cero. En el mundo de la ciencia de datos tales casos de imputación son comunes. En el caso particular de la serie de datos los puntos de datos con cero afectan a las cotizaciones máximas y mínimas, no al cierre de la TRM, por lo que no debiera ser problema si solo se utiliza el cierre como serie de trabajo. 
+
+### Integridad de la serie de datos Petróleo
+Revisamos la integridad de la serie de tiempo del petróleo efectuando análisis de su estructura, valores estadísticos generales, y gráfica de la misma del año 2010 en adelante.
+
+```{r warning=FALSE, error=FALSE}
+# Verificar estructura de wti
+summary(wti)
+autoplot(window(wti, 2010), main = "ANALISIS SERIE DE TIEMPO PETROLEO 2010-2018")
+```
+
+La revisión de la tabla de resumen de valores nos arroja una serie de tiempos con valores que fluctúan entre los 10.25 a 140.00 dólares por barril. La serie no tiene puntos de datos ausentes o en cero, y solo una serie de tiempo está presente, por lo que no reviste mayores problemas. 
+
+### Integridad de la serie de datos Café
+Revisamos la integridad de la serie de tiempo del café efectuando análisis de su estructura, valores estadísticos generales, y gráfica de la misma del año 2010 en adelante.
+
+```{r warning=FALSE, error=FALSE}
+# Verificar estructura de coffee
+summary(coffee)
+autoplot(window(coffee, 2010), main = "ANALISIS SERIE DE TIEMPO CAFE 2010-2018")
+```
+
+La serie de tiempo del café tiene una estructura única, con valores claros para cada punto de sus cotizaciones, sin que falten puntos de datos o existan valores en cero. De la forma que se ha extraído, la serie de tiempos no presenta problemas para el análisis futuro.
+
+### Integridad de la serie de datos Carbón
+Revisamos la integridad de la serie de tiempo del carbón efectuando análisis de su estructura, valores estadísticos generales, y gráfica de la misma del año 2010 en adelante.
+
+```{r warning=FALSE, error=FALSE}
+# Verificar estructura de coal
+summary(coal)
+autoplot(window(coal, 2010), main = "ANALISIS SERIE DE TIEMPO CARBON 2010-2018")
+```
+
+La serie de tiempo del carbón presenta también un comportamiento de serie compuesta, con múltiples cotizaciones presentes para cada punto de datos de fecha. Según el marco teórico del trabajo de tesis doctoral, Colombia se rige por el tipo de carbón _Northern Appalachia 13,000 BTU_, por lo que en el futuro debemos aislar la serie de tiempo solamente a dicha cotización. El resumen estadístico descriptivo de dicha cotización no evidencia falta de datos o puntos de datos en cero, por lo que solamente se debe aislar la serie de las otras cotizaciones no utilizadas en Colombia. 
+
+## Creación de la Matriz de Datos para el Análisis y Uso de Aprendizaje Automatizado
+Es factible trabajar toda la investigación utilizando las series de tiempo en su estado natural. Pero para facilitar el trabajo de programación, la conversión a una matriz de datos - estructura conocida en el lenguaje R como _data frame_ - acelera el proceso y nos permite utilizar el grueso de las librerías existentes de funciones de aprendizaje automatizado sin necesidad de conversiones de tipos dinámicas. 
+
+```{r warning=FALSE, error=FALSE}
+# Convertir las cuatro series de tiempo en un data frame NO TIME CASTING
+# La serie de tiempo de carbón solo necesita la cotización Northern Appalachian
+coal <- coal[,2]
+
+# La serie de tiempo de TRM solo utilizará la cotización de cierre
+trm <- trm[,1]
+
+df_coffee <- data.frame(date=index(coffee), coffee = melt(coffee)$value)
+df_coal <- data.frame(date=index(coal), coal = melt(coal)$value)
+df_wti <- data.frame(date=index(wti), wti = melt(wti)$value)
+df_trm <- data.frame(date=index(trm), trm = melt(trm)$value)
+
+# Merge data frames
+df1 <- merge(df_trm, df_wti)
+df1 <- merge(df1, df_coal)
+df1 <- merge(df1, df_coffee)
+summary(df1)
+```
+
+La creación de la matriz de datos no es satisfactoria al momento de análisis. Vemos múltiples errores a través de la consola de ejecución del sistema.
+
+* El lenguaje R solo puede fusionar matrices de datos de a dos. Evidenciamos una reducción sistemática del número de observaciones de datos con cada fusión a partir de la primera. 
+* La matriz **df1** tiene un tamaño final de solo 36 observaciones por regresor, muy por debajo del número esperado de 250 como mínimo, sobre todo si las lecturas iniciales de series de tiempo tienen cientos de observaciones.
+* Se observan problemas con la interpretación de las mascaras de fecha en cada serie de tiempo. Al parecer cada serie registra una máscara de tiempo diferente (diferencias en los formatos en los cuales aparecen la fecha de año, mes y día) lo que confunde al algoritmo que crea la unión de los conjuntos de cada serie de tiempo. 
+
+Esta prueba piloto demuestra que a pesar de tener lecturas de series de datos exitosas, la manipulación de las mismas está fallando al momento de agregarlas de forma mensual y darles unión utilizando como clave la variable fecha que no es estándar para todas las series de datos. Si el algoritmo falla con solo cuatro variables, probablemente el margen de error aumente cuando el número de regresores se triplique en la metodología esperada de investigación completa. 
+
+## Análisis Cruzado de Correlación 
+A pesar de la falta de puntos de datos para obtener un análisis estadístico con alto nivel de confiabilidad, podemos poner a prueba la matriz existente para buscar correlaciones entre las variables que nos permitan vislumbrar si estamos por el camino correcto de análisis. Para tal fin ejecutamos el código para tres tipos diferentes de análisis: 
+
+a. Matriz de correlación de Pearson y Spearman de las diferentes variables.
+b. Gráfica de correlación cruzada con valores _p_ asociados
+c. Correlograma de variables
+
+### Matriz de Correlación Pearson y Spearman
+Utilizamos las funciones _rcorr()_ de R para revisar niveles de correlación entre variables. Sabemos que tenemos menos observaciones de las deseadas, pero de existir correlaciones fuertes las formulas nos darán no solo el coeficiente de correlación _r_ de Pearson, sino el coeficiente de determinación _r^2^_ de Spearman.
+
+```{r warning=FALSE, error=FALSE}
+# Matriz de correlación Pearson y Spearman
+corrTest2 <- rcorr(as.matrix(df1), type = c("pearson","spearman"))
+corrTest2
+```
+
+Los resultados no son muy alentadores inicialmente, pero la correlación entre la TRM y el valor del petroleo es fuerte con un valor de -0.88. Inclusive debemos profundizar el valor de correlación 0.55 entre la TRM y el precio del carbón. Esto se evidencia aún más en la tabla inferior donde aparecen los valores _p_ de dichas correlaciones. Es notable que todos son menores a 0.05 para correlaciones entre la TRM, el café, el carbón y el petroleo. 
+
+### Gráfica de Correlación entre Variables
+La gráfica de correlación entre variables es un instrumento de extrema utilidad aunque a veces un tanto saturado en información. La función mide los grados de correlación entre múltiples variables de un _data frame_ de R y en forma visual analiza niveles de correlación y valores _p_ de las mismas. 
+
+```{r warning=FALSE, error=FALSE}
+chart.Correlation(df1, histogram=TRUE, pch=19)
+```
+
+El cuadro asocia los niveles de valor _p_ de las correlaciones a través del uso de estrellas: tres estrellas para valores de _p < 0.001_, dos estrellas para valores de _p < 0.01_, y una estrella para valores de _p < 0.05_. Este cuadro ayuda a reconocer correlaciones interesantes como la de la TRM con el precio de la tonelada de carbón, cuyo valor de correlación es -0.51 pero que al tener dos estrellas asociadas nos indica un valor _p_ bajo, indicativo de que la correlación no se da por azar. 
+
+### Correlograma de Variables
+A diferencia de la gráfica de correlación entre variables, que puede ser difícil de interpretar cuando el número de variables es mayor a ocho, el correlograma utiliza una visualización resumida de valores dependiendo de escala de colores y tamaños para el análisis visual. 
+
+```{r warning=FALSE, error=FALSE}
+corrplot(corrTest2$r, type="upper", order="hclust", p.mat = corrTest2$P, 
+         sig.level = 0.01, insig = "blank")
+```
+
+El cuadro muestra correlaciones positivas en azul y correlaciones negativas en rojo. La intensidad del color y el tamaño del círculo en cada instancia es proporcional a la fuerza de la correlación. Al lado derecho del correlograma se ven la escala de correlación y colores. Al escrutinio visual el cuadro nos muestra la fuerte correlación negativa entre el valor de la TRM y el petroleo, y una correlación negativa un tanto más débil entre el valor de la TRM y el precio internacional del carbón. 
+
+# Conclusiones de la Prueba Piloto en Laboratorio
+La prueba piloto en el laboratorio nos ha dejado lecciones interesantes sobre el proceso de recopilación de datos y análisis de los mismos. 
+
+* *Las series de datos no tienen estructura homogénea:* A pesar de provenir de una fuente sólida a través de una biblioteca API confiable, las series de datos no tienen formato homogéneo y cada una debe ser evaluada por separado para comprobar integridad. El problema mayor son las máscaras de fecha, que al ser la clave de unión de los diferentes juegos de datos y no tener estructura común ocasionan pérdidas de observaciones al momento de la fusión. 
+
+* *La función R de fusión de matrices de datos no es fiable:* Si bien no ha sido comprobado, tenemos la duda de si la función _merge()_ de *R* no está a la vez ocasionando la pérdida de puntos de datos al solo poder unir dos conjuntos a la vez. Esto se traduce a tener que manipular matrices de muy pocos puntos de datos. Hubiera sido preferible tratar con matrices más pobladas aunque en algunas filas se hubiera tenido que lidiar con datos faltantes o ceros. La ciencia de datos preve métodos para la imputación de datos, pero no para la falta de los mismos. Este es un error grave en la confección de la investigación que se debe solventar. 
+
+* *Las fechas como clave de unión solo son útiles para alinear la estructura de la matriz de datos final:* La metodología combina el ensamblaje de pronóstico de series de tiempo con la regresión multivariable, pero las fechas de los puntos de observación solo son útiles en la serie de tiempo representativa de la TRM y para unir la estructura de datos. Luego puede ser eliminada ya que no tiene mayor utilidad en la ecuación de regresión multivariable. 
+
+* *Es imperioso volver a los níveles mínimos de observaciones calculados en la proyección de la muestra de estudio:* Al comienzo de la investigación se proyectó como factible obtener muestras mínimas de 2,080 observaciones por regresor, teniendo en consideración que para cada uno se podía cotizar cinco veces por semana, cincuenta y dos veces al año, por ocho años (el período que abarca el 2010 al 2017). Las fórmulas de muestra mínima para un universo conocido arrojaban una muestra de por lo menos 503 puntos de datos para un nivel de confianza del 99\% y un margen de error inferior al 5\%. Es inaceptable por lo tanto no solo el hecho que el código haya fallado en recopilar dichos datos, sino que además los haya resumido a una matriz de 36 observaciones por regresor. 
+
+Dentro de la literatura de Ciencia de Datos, y de forma coloquial en los circulos de científicos de datos, se sabe que el 70% de los esfuerzos y recursos de cada investigación se dedican a la recopilación, limpieza, imputación, y depuración de la data. Esta prueba piloto no hace sino reforzar el conocimiento de la comunidad. Contamos con herramientas de análisis que simplifican en segundos lo que puede llevar horas de cálculos estadísticos. Inclusive con una cantidad reducida de datos vemos niveles interesantes de coeficientes de correlación, coeficientes de determinación, y niveles de valores _p_ de alta significancia estadística. Ahora debemos volver al borrador inicial de la herramienta de recopilación de datos, diseñar un algoritmo más fuerte que registre series completas de datos por regresor por separado, y las ensamble de una manera que la heterogeneidad de las estructuras no destruya la riqueza de los datos. 
+
+
