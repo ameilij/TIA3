@@ -1,0 +1,210 @@
+---
+title: "TIA3 Semana 4 - An<c3><a1>lisis de Datos"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+## Introducción
+La programación literaria nos permite el uso de herramientas interactivas de programación que facilitan el análisis explorativo de datos y las tareas de investigación estadística. En el siguiente trabajo buscamos hacer un análisis detallado de los juegos de datos utilizados para el trabajo de investigación _Modelo Predictivo de la TRM Utilizando Aprendizaje Automatizado_. Nos interesa profundizar sobre la serie de datos que representa los valores de la TRM y su comportamiento como serie de tiempos y la matriz de datos de regresores representativos de los diferentes rubros que componen las principales categorías de exportación de Colombia.
+
+### Objetivos de la Serie de Datos TRM
+La serie de datos TRM representa el valor de cierre de cada uno de los días de cotización de la tasa de cambio del dólar con respecto al peso colombiano. Para que la serie de tiempo tenga valor predictivo nos interesa:
+
+* Analizar la descomposición de la serie de tiempo en sus componentes de tendencia secular, estacionalidad y error. 
+* Verificar si es estacionaria o debe ser transformada previo a su utilización en pronósticos ARIMA
+
+### Objetivos de la Matriz de Datos de Regresores Varios
+La matriz de datos __df1__ representa la composición de la cotización diaria en el mercado de múltiples regresores correspondientes a los diferentes rubros de exportación de Colombia. Según nuestra hipótesis de trabajo estos deben guardar una correlación estrecha con el valor de la TRM ya que el aumento de la exportación de bienes incrementa la entrada de divisas al país, lo que fortalece la moneda nacional y impacta la apreciación del peso. Por lo tanto es importante detectar:
+
+* Grado de correlación entre cada una de las series de datos correspondiente a el regresor particular y el valor de la TRM
+* Grado de correlación entre regresores, los cuales pudieran estar estrechamente correlacionados y aportar poco al valor predictivo del modelo en el futuro. 
+
+## Recopilación de Datos
+Para la recopilación de datos se utilizaron las bases de datos de la empresa Quandl con técnicas de _data wrangling_ para mejorar la integridad y consistencia de las mismas.
+
+```{r error=FALSE, message=FALSE, include=FALSE}
+# TIA3Semana4CodeC.R
+# Ariel E. Meilij
+# July-29-2018
+
+# Carga de librerias necesarias
+library(Quandl)
+library(tseries)
+library(ggplot2)
+library(ggfortify)
+library(Hmisc)
+library(corrplot)
+library(PerformanceAnalytics)
+library(reshape2)
+library(ggpubr)
+
+# Llave autorización API
+Quandl.api_key("KzzS8Vfxkw1ZgTWgU4jH")
+
+# Limpiar serie de tiempo TRM en su data.frame
+trm <- Quandl("CURRFX/USDCOP")
+trm <- trm[, 1:2]
+trm <- subset(trm, trm$Date > "2009-12-31")
+trm <- subset(trm, trm$Rate > 1500)
+colnames(trm) <- c("Date", "trm")
+
+# Limpiar serie de tiempo WTI en su data.frame
+wti <- Quandl("EIA/PET_RWTC_D")
+wti <- subset(wti, wti$Date > "2009-12-31")
+colnames(wti) <- c("Date", "wti")
+
+# Limpiar serie de tiempo COAL en su data.frame
+coal <- Quandl("EIA/COAL")
+coal <- coal[, 1:2]
+coal <- subset(coal, coal$`Week Ended` > "2009-12-31")
+colnames(coal) <- c("Date", "coal")
+
+# Limpiar serie de tiempo COFFEE en su data.frame
+coffee <- Quandl("CHRIS/ICE_KC1")
+coffee <- coffee[,c(1,5)]
+coffee <- subset(coffee, coffee$Date > "2009-12-31")
+coffee <- subset(coffee, coffee$Settle > 0)
+colnames(coffee) <- c("Date", "coffee")
+
+# Limpiar serie de tiempo GOLD en su data.frame
+gold <- Quandl("WGC/GOLD_DAILY_USD")
+gold <- subset(gold, gold$Date > "2009-12-31")
+colnames(gold) <- c("Date", "gold")
+
+# Limpiar serie de tiempo NICKEL en su data.frame
+nickel <- Quandl("CHRIS/MCX_NI1")
+nickel <- nickel[, c(1,5)]
+nickel <- subset(nickel, nickel$Date > "2009-12-31")
+colnames(nickel) <- c("Date", "nickel")
+
+# Limpiar serie de tiempo GASOIL en su data.frame
+gasoil <- Quandl("NASDAQOMX/NQCIGOER")
+gasoil <- gasoil[, c(1:2)]
+gasoil <- subset(gasoil, gasoil$`Trade Date` > "2009-12-31")
+gasoil <- subset(gasoil, gasoil$`Index Value` > 0)
+colnames(gasoil) <- c("Date", "gasoil")
+
+# Limpiar serie de tiempo HULLA TERMINCA en su data.frame
+thermal <- Quandl("CHRIS/SGX_CFF3")
+thermal <- thermal[, c(1,6)]
+thermal <- subset(thermal, thermal$Date > "2009-12-31")
+colnames(thermal) <- c("Date", "thermal")
+
+# Merge data frames
+df1 <- merge(trm, gold)
+df1 <- merge(df1, wti)
+df1 <- merge(df1, coal)
+df1 <- merge(df1, coffee)
+df1 <- merge(df1, nickel)
+df1 <- merge(df1, gasoil)
+df1 <- merge(df1, thermal)
+```
+
+El resultado de las diferentes series se visualiza en el siguiente cuadro:
+
+```{r message=FALSE, error=FALSE,include=FALSE }
+# Multiple Graph
+graf1 <- ggplot(trm, aes(x = Date, y = trm)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion TRM")
+graf2 <- ggplot(wti, aes(x = Date, y = wti)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion WTI")
+graf3 <- ggplot(coal, aes(x = Date, y = coal)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Carbon")
+graf4 <- ggplot(coffee, aes(x = Date, y = coffee)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Cafe")
+graf5 <- ggplot(gold, aes(x = Date, y = gold)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Oro")
+graf6 <- ggplot(nickel, aes(x = Date, y = nickel)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Ferroniquel")
+graf7 <- ggplot(gasoil, aes(x = Date, y = gasoil)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Indice Gasoil")
+graf8 <- ggplot(thermal, aes(x = Date, y = thermal)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Indice Hulla Térmica")
+
+# Multiple Graph
+graf1 <- ggplot(trm, aes(x = Date, y = trm)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion TRM")
+graf2 <- ggplot(wti, aes(x = Date, y = wti)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion WTI")
+graf3 <- ggplot(coal, aes(x = Date, y = coal)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Carbon")
+graf4 <- ggplot(coffee, aes(x = Date, y = coffee)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Cafe")
+graf5 <- ggplot(gold, aes(x = Date, y = gold)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Oro")
+graf6 <- ggplot(nickel, aes(x = Date, y = nickel)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Ferroniquel")
+graf7 <- ggplot(gasoil, aes(x = Date, y = gasoil)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Indice Gasoil")
+graf8 <- ggplot(thermal, aes(x = Date, y = thermal)) + geom_line(color = "#00AFBB", size = 1) + 
+  xlab("Fechas") + ylab("Cotizacion Indice Hulla Térmica")
+
+```
+
+```{r}
+ggarrange(graf1, graf2, graf3, graf4, graf5, graf6, graf7, graf8 + rremove("x.text"), 
+          labels = c("TRM", "WTI", "CARBON", "CAFE", "ORO", "FERRONIQUEL", "GASOIL", "HULLA TERMICA" ),
+          ncol = 4, nrow = 2)
+```
+
+## Análisis de Relación entre la TRM y Factores Exógenos Varios
+De acuerdo a la hipótesis de trabajo propuesta, las diferentes series de tiempo que representan las exportaciones de Colombia deben tener un efecto sobre la TRM. A mayor nivel de exportación, mayor la entrada de divisas al país, apreciando la moneda y disminuyendo el valor del dólar en pesos colombianos representado por la TRM. De igual manera, cuando el precio de los bienes de exportación baja, el ingreso por exportación de los mismos (prevaleciendo los niveles de exportación constantes) disminuye el flujo de divisas al país, con un efecto de devaluación sobre la moneda local. Si el efecto es apreciable, debieramos notar:
+
+* Un coeficiente de correlación negativo entre la TRM y cualquier regresor, o sea una disminución de la TRM cuando hay un aumento en el precio de los bienes de exportación.
+* Un fuerte coeficiente de determinación en dicha correlación 
+
+Utilizaremos una serie de correlogramas cruzado de la biblioteca _ggplot2_ para visualizar el grado de correlación de Pearson ($R$) y coeficiente de determinación ($R^2$). Comenzaremos con un ejemplo simple de variables cruzadas que califica el grado de correlación y pendiente (el aumento en la intensidad del color determina grado de correlación, el color rojo determina correlación negativa y el color azul positiva).
+
+```{r error=FALSE, message=FALSE}
+# Test potential correlations
+corrTest2 <- rcorr(as.matrix(df1[,-1]), type = c("pearson","spearman"))
+
+# Cite STHDA http://www.sthda.com/english/wiki/visualize-correlation-matrix-using-correlogram
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+corrplot(corrTest2$r, method="color", col=col(200),  
+         type="upper", order="hclust", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, #Text label color and rotation
+         # Combine with significance
+         p.mat = corrTest2$P, sig.level = 0.05, insig = "blank",  
+         # hide correlation coefficient on the principal diagonal
+         diag=FALSE 
+)
+```
+Del gráfico de visualización podemos deducir los siguientes:
+
+1. Todas las variables exógenas que representan rubros importantes de exportación tienen correlación con pendiente negativa con respecto de la variable independiente TRM. 
+2. Todas las variables exógenas que representan rubros importantes de exportación tienen grados de correlación que varían desde medianamente fuerte (el cafe con -0.67) a muy fuerte (el gasoil con -0.91).
+3. Todas las variables exógenas que representan rubros importantes de exportación cumplen con la premisa de la hipótesis de trabajo.
+
+Para secundar el análisis visual, revisaremos el segundo cuadro que no solo verifica coeficientes de correlación, sino que asocia distribuciones y coeficientes de determinación. Adicionalmente el próximo correlograma cataloga a través de un código de estrellas el valor _p_ de dicha correlación (una estrella para valores _p_ de 0.10, dos estrellas para valores _p_ de 0.05, y tres estrellas para valores _p_ de 0.01):
+
+```{r}
+chart.Correlation(df1[,-1], histogram=TRUE, pch=19)
+```
+
+El cuadro no emite el orden de las variables de forma similar al correlograma anterior, pero todos los coeficicientes de correlación son idénticos. Adicional al valor de $R$, es interesante ver el valor _p_ asociado a cada una de las correlaciones, todos de tres estrellas (valores _p_ igual o inferior a 0.01).
+
+## Comprobando el Calce del Modelo con Regresión Multivariable
+El problema de producir el modelo predictivo adecuado se resuelve mejor con el uso de aprendizaje automatizado, pero como punto de verificación es interesante hacer un calce de los datos dentro de una regresión multivariable. 
+
+```{r error=FALSE, message=FALSE, include=FALSE}
+fit <- lm(trm ~ gasoil + wti + coffee + nickel + gold + coal + thermal, data = df1)
+```
+
+Al ajustar el modelo obtenemos la siguiente solución:
+
+```{r}
+summary(fit)
+```
+El modelo de revisión, sin el uso de datos entrenados, obtiene valores de $R$ de 0.94 y de $R^2$ ajustado de 0.93. Deducimos entonces que aún podemos mejorar el valor predictivo del mismo a través del uso de aprendizaje automatizado que generalice mejor la solución para un juego de datos cualesquiera. 
+
+### Comprobación del Calce de Datos dentro de la Regresión Multivariable con Visualización de Residuos (Perturbación Aleatoria)
+Comprobaremos que no existe heterocedasticidad en la regresión (lo que equivale a decir que se cumple el principio de homocedasticidad) a través de la visualización de los residuos, o el error de la perturbación aleatoria.
+
+```{r error=FALSE, message=FALSE, }
+qplot(y = fit$residuals, x = index(fit$residuals), geom = "point", main = "Residuos de la Regresion Multivariable", ylab = "Residuos", xlab = " ")
+```
+La gráfica muestra una distribución relativamente caótica y similar al ruido blanco, indicio de que el principio de homocedasticidad se cumple y no hay evidencia clara de heterocedasticidad que afecte el ajuste del modelo. 
+
